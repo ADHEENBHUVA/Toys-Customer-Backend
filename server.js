@@ -13,6 +13,10 @@ mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('Customer Backend: Connected to MongoDB'))
     .catch(err => console.error('Customer Backend: MongoDB connection error:', err));
 
+app.get('/', (req, res) => {
+    res.send('Customer Backend is running on Vercel!');
+});
+
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'Customer Backend is running' });
 });
