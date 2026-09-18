@@ -33,8 +33,10 @@ app.use('/api/payment', require('./routes/paymentRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/shipping', require('./routes/shippingRoutes'));
 
-app.listen(PORT, () => {
-    console.log(`Customer Backend server is running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`Customer Backend server is running on port ${PORT}`);
+    });
+}
 
 module.exports = app;
