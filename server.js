@@ -32,6 +32,7 @@ app.use('/api/banners', require('./routes/bannerRoutes'));
 app.use('/api/payment', require('./routes/paymentRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/shipping', require('./routes/shippingRoutes'));
+app.use('/api/settings', require('./routes/settingsRoutes'));
 
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
