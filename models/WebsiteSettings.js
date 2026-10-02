@@ -20,6 +20,11 @@ const websiteSettingsSchema = new mongoose.Schema({
         metaDescription: String,
         keywords: String,
         openGraphImage: String
+    },
+    discountDisplayType: {
+        type: String,
+        enum: ['amount', 'percentage'],
+        default: 'amount'
     }
 }, { timestamps: true });
 

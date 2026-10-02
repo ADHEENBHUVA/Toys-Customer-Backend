@@ -10,6 +10,7 @@ const productSchema = new mongoose.Schema({
     description: { type: String },
     shortDescription: { type: String },
 
+    originalPrice: { type: Number, min: 0 },
     price: { type: Number, required: true, min: 0 },
     discountPrice: { type: Number, min: 0 },
     discountPercentage: { type: Number, min: 0, max: 100 },
@@ -38,6 +39,9 @@ const productSchema = new mongoose.Schema({
     safetyInformation: { type: String },
 
     status: { type: String, enum: ['Active', 'Inactive', 'Draft', 'Out of Stock'], default: 'Draft' },
+
+    rating: { type: Number, default: 0 },
+    ratingCount: { type: Number, default: 0 },
 
     featuredProduct: { type: Boolean, default: false },
     bestSeller: { type: Boolean, default: false },

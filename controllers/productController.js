@@ -19,7 +19,7 @@ exports.getTrendingProducts = async (req, res) => {
         let products = [];
         if (productIds.length > 0) {
             // Fetch the products matching these IDs
-            products = await Product.find({ _id: { $in: productIds }, status: 'Active' }, { images: { $slice: 1 } }).lean();
+            products = await Product.find({ _id: { $in: productIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } }).lean();
             
             // Sort them in the order of topSelling
             products.sort((a, b) => {
@@ -27,17 +27,23 @@ exports.getTrendingProducts = async (req, res) => {
             });
         }
 
-        // If less than 8 products found, fill the rest with featured or bestSeller
-        if (products.length < 8) {
+        // If less than 24 products found, fill the rest with featured or bestSeller
+        if (products.length < 24) {
             const excludeIds = products.map(p => p._id);
-            const additionalProducts = await Product.find({ _id: { $nin: excludeIds }, status: 'Active' }, { images: { $slice: 1 } })
-                .sort({ featuredProduct: -1, bestSeller: -1, createdAt: -1 })
-                .limit(8 - products.length)
+            const additionalProducts = await Product.find({ _id: { $nin: excludeIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
+                .sort({ status: 1, featuredProduct: -1, bestSeller: -1, createdAt: -1 })
+                .limit(24 - products.length)
                 .lean();
             products = [...products, ...additionalProducts];
         }
 
         const finalProductIds = products.map(p => p._id);
+        
+        const Category = require('../models/Category');
+        const categories = await Category.find().lean();
+        const catMap = {};
+        categories.forEach(c => catMap[c._id.toString()] = c.name);
+        
         const reviewStats = await Review.aggregate([
             { $match: { product: { $in: finalProductIds }, status: 'Approved' } },
             { $group: { _id: '$product', avgRating: { $avg: '$rating' }, count: { $sum: 1 } } }
@@ -50,7 +56,11 @@ exports.getTrendingProducts = async (req, res) => {
 
         products = products.map(p => {
             const stats = reviewMap[p._id.toString()] || { rating: 0, count: 0 };
-            return { ...p, rating: stats.rating, reviewCount: stats.count };
+            let catName = p.category;
+            if (p.category && catMap[p.category.toString()]) {
+                catName = catMap[p.category.toString()];
+            }
+            return { ...p, category: catName, rating: stats.rating, reviewCount: stats.count };
         });
 
         res.status(200).json(products);
@@ -60,14 +70,73 @@ exports.getTrendingProducts = async (req, res) => {
     }
 };
 
-// Get all active products
-exports.getAllProducts = async (req, res) => {
+// Get New Arrivals (Products added in the last 15 days)
+exports.getNewArrivals = async (req, res) => {
     try {
-        let products = await Product.find({ status: 'Active' }, { images: { $slice: 1 } })
+        const fifteenDaysAgo = new Date();
+        fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+
+        let products = await Product.find({
+            status: { $in: ['Active', 'Out of Stock'] },
+            createdAt: { $gte: fifteenDaysAgo }
+        }, { images: { $slice: 5 } })
             .populate('subCategory', 'name')
             .sort({ createdAt: -1 })
             .lean();
+
+        // Include Category name and Ratings, just like other endpoints
+        const Category = require('../models/Category');
+        const categories = await Category.find().lean();
+        const catMap = {};
+        categories.forEach(c => { catMap[c._id.toString()] = c.name; });
+
+        const productIds = products.map(p => p._id);
+        const reviews = await Review.aggregate([
+            { $match: { product: { $in: productIds }, status: 'Approved' } },
+            { $group: { _id: '$product', averageRating: { $avg: '$rating' }, count: { $sum: 1 } } }
+        ]);
+
+        const reviewMap = {};
+        reviews.forEach(r => {
+            reviewMap[r._id.toString()] = { rating: r.averageRating, count: r.count };
+        });
+
+        products = products.map(p => {
+            const stats = reviewMap[p._id.toString()] || { rating: 0, count: 0 };
+            let catName = 'Uncategorized';
+            if (p.category && catMap[p.category.toString()]) {
+                catName = catMap[p.category.toString()];
+            }
+            return { ...p, category: catName, rating: stats.rating, reviewCount: stats.count };
+        });
+
+        res.status(200).json(products);
+    } catch (error) {
+        console.error('Error fetching new arrivals:', error);
+        res.status(500).json({ message: 'Server error fetching products' });
+    }
+};
+
+// Get all active and out of stock products
+exports.getAllProducts = async (req, res) => {
+    try {
+        let products = await Product.find({ status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
+            .populate('subCategory', 'name')
+            .sort({ bestSeller: -1, createdAt: -1 })
+            .lean();
         
+        // Sort Active first, Out of Stock last
+        products.sort((a, b) => {
+            if (a.status === 'Active' && b.status !== 'Active') return -1;
+            if (a.status !== 'Active' && b.status === 'Active') return 1;
+            return 0;
+        });
+        
+        const Category = require('../models/Category');
+        const categories = await Category.find().lean();
+        const catMap = {};
+        categories.forEach(c => catMap[c._id.toString()] = c.name);
+
         const productIds = products.map(p => p._id);
         const reviewStats = await Review.aggregate([
             { $match: { product: { $in: productIds }, status: 'Approved' } },
@@ -81,7 +150,11 @@ exports.getAllProducts = async (req, res) => {
 
         products = products.map(p => {
             const stats = reviewMap[p._id.toString()] || { rating: 0, count: 0 };
-            return { ...p, rating: stats.rating, reviewCount: stats.count };
+            let catName = p.category;
+            if (p.category && catMap[p.category.toString()]) {
+                catName = catMap[p.category.toString()];
+            }
+            return { ...p, category: catName, rating: stats.rating, reviewCount: stats.count };
         });
 
         res.status(200).json(products);
