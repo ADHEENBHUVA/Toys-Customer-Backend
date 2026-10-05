@@ -76,7 +76,8 @@ exports.verifyPayment = async (req, res) => {
                 subTotal: orderData.subTotal,
                 taxAmount: 0,
                 shippingCharge: orderData.shippingCharge,
-                discountAmount: 0,
+                discountAmount: orderData.discountAmount || 0,
+                couponCode: orderData.couponCode,
                 totalAmount: orderData.totalAmount,
                 orderStatus: 'Confirmed',
                 razorpayOrderId: razorpay_order_id,
@@ -84,6 +85,14 @@ exports.verifyPayment = async (req, res) => {
             });
 
             await newOrder.save();
+
+            if (orderData.couponCode) {
+                const Coupon = require('../models/Coupon');
+                await Coupon.findOneAndUpdate(
+                    { code: orderData.couponCode },
+                    { $inc: { usedCount: 1 } }
+                );
+            }
 
             res.json({
                 success: true,

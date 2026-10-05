@@ -12,24 +12,53 @@ exports.getAllCategories = async (req, res) => {
 
 exports.getTopCategories = async (req, res) => {
     try {
-        const Product = require('../models/Product');
         const Category = require('../models/Category');
+        const Order = require('../models/Order');
 
-        const topCategoryStats = await Product.aggregate([
-            { $match: { status: { $in: ['Active', 'Out of Stock'] } } },
-            { $group: { _id: '$category', productCount: { $sum: 1 } } },
-            { $sort: { productCount: -1 } },
-            { $limit: 4 }
+        const topCategoryStats = await Order.aggregate([
+            { $unwind: '$orderItems' },
+            {
+                $lookup: {
+                    from: 'products',
+                    localField: 'orderItems.product',
+                    foreignField: '_id',
+                    as: 'productDoc'
+                }
+            },
+            { $unwind: '$productDoc' },
+            { $match: { 'productDoc.category': { $ne: null }, 'productDoc.category': { $ne: '' } } },
+            { $group: { _id: '$productDoc.category', totalSold: { $sum: '$orderItems.quantity' } } },
+            { $sort: { totalSold: -1 } },
+            { $limit: 4 },
+            { $sort: { totalSold: 1 } } // Ascending order
         ]);
 
-        const catIds = topCategoryStats.map(c => c._id);
+        if (topCategoryStats.length === 0) {
+            const fallbackCategories = await Category.find({ status: 'Active' })
+                .sort({ displayOrder: 1, createdAt: -1 })
+                .limit(4)
+                .lean();
+            return res.status(200).json({ success: true, data: fallbackCategories });
+        }
+
+        const catNames = topCategoryStats.map(c => c._id).filter(name => name);
         
-        const topCategories = await Category.find({ _id: { $in: catIds }, status: 'Active' }).lean();
+        const topCategories = await Category.find({ name: { $in: catNames }, status: 'Active' }).lean();
 
         // Sort them to match the aggregate order
         topCategories.sort((a, b) => {
-            return catIds.findIndex(id => id && id.toString() === a._id.toString()) - catIds.findIndex(id => id && id.toString() === b._id.toString());
+            return catNames.indexOf(a.name) - catNames.indexOf(b.name);
         });
+
+        // Ensure we still have 4 categories if possible
+        if (topCategories.length < 4) {
+            const existingNames = topCategories.map(c => c.name);
+            const additionalCategories = await Category.find({ name: { $nin: existingNames }, status: 'Active' })
+                .sort({ displayOrder: 1, createdAt: -1 })
+                .limit(4 - topCategories.length)
+                .lean();
+            topCategories.push(...additionalCategories);
+        }
 
         res.status(200).json({ success: true, data: topCategories });
     } catch (error) {

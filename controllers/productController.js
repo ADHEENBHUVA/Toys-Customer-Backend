@@ -70,15 +70,15 @@ exports.getTrendingProducts = async (req, res) => {
     }
 };
 
-// Get New Arrivals (Products added in the last 15 days)
+// Get New Arrivals (Products added in the last 30 days)
 exports.getNewArrivals = async (req, res) => {
     try {
-        const fifteenDaysAgo = new Date();
-        fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
         let products = await Product.find({
             status: { $in: ['Active', 'Out of Stock'] },
-            createdAt: { $gte: fifteenDaysAgo }
+            createdAt: { $gte: thirtyDaysAgo }
         }, { images: { $slice: 5 } })
             .populate('subCategory', 'name')
             .sort({ createdAt: -1 })
@@ -113,6 +113,62 @@ exports.getNewArrivals = async (req, res) => {
         res.status(200).json(products);
     } catch (error) {
         console.error('Error fetching new arrivals:', error);
+        res.status(500).json({ message: 'Server error fetching products' });
+    }
+};
+
+// Get Best Sellers (Top 30 products ordered in the last 30 days)
+exports.getBestSellers = async (req, res) => {
+    try {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        const topSelling = await Order.aggregate([
+            { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+            { $unwind: '$orderItems' },
+            { $group: { _id: '$orderItems.product', totalSold: { $sum: '$orderItems.quantity' } } },
+            { $sort: { totalSold: -1 } },
+            { $limit: 30 },
+            { $sort: { totalSold: 1 } } // Ascending order as requested
+        ]);
+
+        let productIds = topSelling.map(item => item._id);
+
+        let products = [];
+        if (productIds.length > 0) {
+            products = await Product.find({ _id: { $in: productIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } }).lean();
+            products.sort((a, b) => {
+                return productIds.findIndex(id => id.toString() === a._id.toString()) - productIds.findIndex(id => id.toString() === b._id.toString());
+            });
+        }
+
+        const Category = require('../models/Category');
+        const categories = await Category.find().lean();
+        const catMap = {};
+        categories.forEach(c => catMap[c._id.toString()] = c.name);
+
+        const reviewStats = await Review.aggregate([
+            { $match: { product: { $in: productIds }, status: 'Approved' } },
+            { $group: { _id: '$product', avgRating: { $avg: '$rating' }, count: { $sum: 1 } } }
+        ]);
+
+        const reviewMap = {};
+        reviewStats.forEach(stat => {
+            reviewMap[stat._id.toString()] = { rating: stat.avgRating, count: stat.count };
+        });
+
+        products = products.map(p => {
+            const stats = reviewMap[p._id.toString()] || { rating: 0, count: 0 };
+            let catName = p.category;
+            if (p.category && catMap[p.category.toString()]) {
+                catName = catMap[p.category.toString()];
+            }
+            return { ...p, category: catName, rating: stats.rating, reviewCount: stats.count };
+        });
+
+        res.status(200).json(products);
+    } catch (error) {
+        console.error('Error fetching best sellers:', error);
         res.status(500).json({ message: 'Server error fetching products' });
     }
 };
@@ -192,19 +248,19 @@ exports.addReview = async (req, res) => {
         const customerId = req.user.id;
 
         // Check if user has purchased the product
-        const hasPurchased = await Order.findOne({
+        const purchasedOrdersCount = await Order.countDocuments({
             customer: customerId,
             'orderItems.product': productId
         });
 
-        if (!hasPurchased) {
+        if (purchasedOrdersCount === 0) {
             return res.status(403).json({ message: 'You can only rate products you have purchased.' });
         }
 
         // Check if user already reviewed
-        const existingReview = await Review.findOne({ product: productId, customer: customerId });
-        if (existingReview) {
-            return res.status(400).json({ message: 'You have already reviewed this product.' });
+        const existingReviewsCount = await Review.countDocuments({ product: productId, customer: customerId });
+        if (existingReviewsCount >= purchasedOrdersCount) {
+            return res.status(400).json({ message: 'You have already reviewed this product for all your purchases.' });
         }
 
         const review = new Review({
@@ -230,13 +286,13 @@ exports.checkReviewEligibility = async (req, res) => {
         const productId = req.params.id;
         const customerId = req.user.id;
         
-        const hasPurchased = await Order.findOne({ customer: customerId, 'orderItems.product': productId });
-        const existingReview = await Review.findOne({ product: productId, customer: customerId });
+        const purchasedOrdersCount = await Order.countDocuments({ customer: customerId, 'orderItems.product': productId });
+        const existingReviewsCount = await Review.countDocuments({ product: productId, customer: customerId });
         
         res.status(200).json({ 
-            canReview: !!hasPurchased && !existingReview,
-            hasPurchased: !!hasPurchased,
-            hasReviewed: !!existingReview
+            canReview: purchasedOrdersCount > existingReviewsCount,
+            hasPurchased: purchasedOrdersCount > 0,
+            hasReviewed: existingReviewsCount > 0
         });
     } catch (error) {
         console.error('Error checking review eligibility:', error);

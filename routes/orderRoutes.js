@@ -17,16 +17,27 @@ router.get('/', authMiddleware, async (req, res) => {
             
         // Fetch all reviews by this user
         const userReviews = await Review.find({ customer: req.user.id }).lean();
-        const reviewedProductIds = new Set(userReviews.map(r => r.product.toString()));
+        const reviewCounts = {};
+        userReviews.forEach(r => {
+            const pid = r.product.toString();
+            reviewCounts[pid] = (reviewCounts[pid] || 0) + 1;
+        });
 
-        // Attach hasReviewed flag to each item
-        orders.forEach(order => {
+        // Assign hasReviewed flag to each item, prioritizing oldest orders
+        for (let i = orders.length - 1; i >= 0; i--) {
+            const order = orders[i];
             order.orderItems.forEach(item => {
-                if (item.product && reviewedProductIds.has(item.product._id.toString())) {
-                    item.hasReviewed = true;
+                if (item.product) {
+                    const pid = item.product._id.toString();
+                    if (reviewCounts[pid] > 0) {
+                        item.hasReviewed = true;
+                        reviewCounts[pid]--;
+                    } else {
+                        item.hasReviewed = false;
+                    }
                 }
             });
-        });
+        }
             
         res.json(orders);
     } catch (err) {

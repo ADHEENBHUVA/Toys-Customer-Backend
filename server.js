@@ -36,6 +36,7 @@ app.use('/api/settings', require('./routes/settingsRoutes'));
 app.use('/api/categories', require('./routes/categoryRoutes'));
 app.use('/api/subscribers', require('./routes/subscriberRoutes'));
 app.use('/api/testimonials', require('./routes/testimonialRoutes'));
+app.use('/api/coupons', require('./routes/couponRoutes'));
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
         console.log(`Customer Backend server is running on port ${PORT}`);

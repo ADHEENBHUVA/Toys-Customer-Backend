@@ -14,6 +14,7 @@ const productSchema = new mongoose.Schema({
     price: { type: Number, required: true, min: 0 },
     discountPrice: { type: Number, min: 0 },
     discountPercentage: { type: Number, min: 0, max: 100 },
+    discountDisplayType: { type: String, enum: ['amount', 'percentage'], default: 'percentage' },
 
     stockQuantity: { type: Number, required: true, min: 0, default: 0 },
     minimumStockAlert: { type: Number, default: 5 },

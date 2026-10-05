@@ -9,8 +9,11 @@ router.get('/trending', productController.getTrendingProducts);
 // Public route to get all products
 router.get('/', productController.getAllProducts);
 
-// Public route to get new arrivals (last 15 days)
+// Public route to get new arrivals (last 30 days)
 router.get('/new-arrivals', productController.getNewArrivals);
+
+// Public route to get best sellers (last 30 days)
+router.get('/best-sellers', productController.getBestSellers);
 
 // Public route to get single product by ID
 router.get('/:id', productController.getProductById);
