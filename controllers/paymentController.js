@@ -89,8 +89,16 @@ exports.verifyPayment = async (req, res) => {
             if (orderData.couponCode) {
                 const Coupon = require('../models/Coupon');
                 await Coupon.findOneAndUpdate(
-                    { code: orderData.couponCode },
-                    { $inc: { usedCount: 1 } }
+                    { code: orderData.couponCode.toUpperCase() },
+                    { 
+                        $inc: { usedCount: 1 },
+                        $push: { 
+                            usedBy: { 
+                                user: req.user.id, 
+                                orderId: newOrder._id 
+                            }
+                        }
+                    }
                 );
             }
 

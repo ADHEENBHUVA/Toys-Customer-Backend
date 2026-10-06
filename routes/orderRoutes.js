@@ -46,4 +46,77 @@ router.get('/', authMiddleware, async (req, res) => {
     }
 });
 
+// @route   PUT /api/orders/:id/cancel
+// @desc    Cancel an order (only if not delivered)
+router.put('/:id/cancel', authMiddleware, async (req, res) => {
+    try {
+        const order = await Order.findOne({ _id: req.params.id, customer: req.user.id });
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+        if (order.orderStatus !== 'Pending') {
+            return res.status(400).json({ message: 'Only Pending orders can be cancelled.' });
+        }
+        
+        order.orderStatus = 'Cancelled';
+        await order.save();
+        
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error("Error cancelling order:", error);
+        res.status(500).json({ message: 'Server error while cancelling order' });
+    }
+});
+
+// @route   PUT /api/orders/:id/return
+// @desc    Return an order (if returnable and within return window)
+router.put('/:id/return', authMiddleware, async (req, res) => {
+    try {
+        const order = await Order.findOne({ _id: req.params.id, customer: req.user.id }).populate('orderItems.product');
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+        if (order.orderStatus !== 'Delivered') {
+            return res.status(400).json({ message: 'Order must be delivered before it can be returned.' });
+        }
+        
+        // Check if any product in the order is returnable
+        let isReturnable = false;
+        let maxReturnDays = 0;
+        
+        order.orderItems.forEach(item => {
+            if (item.product && item.product.isReturnable) {
+                isReturnable = true;
+                if (item.product.returnDays > maxReturnDays) {
+                    maxReturnDays = item.product.returnDays;
+                }
+            }
+        });
+        
+        if (!isReturnable) {
+            return res.status(400).json({ message: 'This order does not contain any returnable products.' });
+        }
+        
+        // Check timeframe
+        if (order.deliveredAt) {
+            const deliveryDate = new Date(order.deliveredAt);
+            const currentDate = new Date();
+            const diffTime = Math.abs(currentDate - deliveryDate);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            if (diffDays > maxReturnDays) {
+                return res.status(400).json({ message: `Return window of ${maxReturnDays} days has expired.` });
+            }
+        }
+        
+        order.orderStatus = 'Returned';
+        await order.save();
+        
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error("Error returning order:", error);
+        res.status(500).json({ message: 'Server error while returning order' });
+    }
+});
+
 module.exports = router;

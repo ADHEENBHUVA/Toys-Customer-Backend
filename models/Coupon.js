@@ -11,6 +11,11 @@ const couponSchema = new mongoose.Schema({
     usageLimit: { type: Number, default: 0 },
     usedCount: { type: Number, default: 0 },
     perCustomerLimit: { type: Number, default: 1 },
+    usedBy: [{
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        usedAt: { type: Date, default: Date.now },
+        orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order' }
+    }],
     status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }
 }, { timestamps: true });
 

@@ -18,10 +18,13 @@ exports.validateCoupon = async (req, res) => {
         }
 
         const now = new Date();
+        const endOfExpiryDate = new Date(coupon.expiryDate);
+        endOfExpiryDate.setHours(23, 59, 59, 999);
+        
         if (now < coupon.startDate) {
             return res.status(400).json({ success: false, message: 'This coupon is not yet valid' });
         }
-        if (now > coupon.expiryDate) {
+        if (now > endOfExpiryDate) {
             return res.status(400).json({ success: false, message: 'This coupon has expired' });
         }
 
@@ -33,8 +36,25 @@ exports.validateCoupon = async (req, res) => {
             return res.status(400).json({ success: false, message: `Minimum order amount of ₹${coupon.minimumOrderAmount} required` });
         }
 
-        // We could also check perCustomerLimit here if we have req.user, but often Cart is unauthenticated.
-        // If we require login to use coupons with perCustomerLimit, we'd check it here or during checkout.
+        // Check perCustomerLimit if Authorization header exists
+        let userId = null;
+        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+            try {
+                const jwt = require('jsonwebtoken');
+                const token = req.headers.authorization.split(' ')[1];
+                const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_temporary_jwt_secret_change_me');
+                userId = decoded.user ? decoded.user.id : decoded.id;
+            } catch (err) {
+                // Ignore invalid tokens for validation
+            }
+        }
+        
+        if (userId && coupon.perCustomerLimit > 0) {
+            const timesUsedByUser = coupon.usedBy.filter(u => u.user && u.user.toString() === userId).length;
+            if (timesUsedByUser >= coupon.perCustomerLimit) {
+                return res.status(400).json({ success: false, message: 'You have already used this coupon' });
+            }
+        }
 
         let discountAmount = 0;
         if (coupon.discountType === 'Percentage') {

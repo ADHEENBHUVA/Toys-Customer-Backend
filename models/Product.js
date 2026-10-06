@@ -41,6 +41,9 @@ const productSchema = new mongoose.Schema({
 
     status: { type: String, enum: ['Active', 'Inactive', 'Draft', 'Out of Stock'], default: 'Draft' },
 
+    isReturnable: { type: Boolean, default: false },
+    returnDays: { type: Number, default: 0 },
+
     rating: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
 
