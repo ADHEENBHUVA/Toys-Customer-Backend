@@ -38,6 +38,7 @@ app.use('/api/subscribers', require('./routes/subscriberRoutes'));
 app.use('/api/testimonials', require('./routes/testimonialRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
+app.use('/api/promomedia', require('./routes/promoMediaRoutes'));
 
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
