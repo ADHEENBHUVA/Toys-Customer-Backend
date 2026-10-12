@@ -11,6 +11,7 @@ router.get('/', authMiddleware, async (req, res) => {
         
         // req.user.id holds the customer/user ID
         const orders = await Order.find({ customer: req.user.id })
+            .populate('customer', 'firstName lastName name email phone')
             .populate('orderItems.product')
             .sort({ createdAt: -1 }) // Newest first
             .lean();
@@ -43,6 +44,25 @@ router.get('/', authMiddleware, async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: 'Server error while fetching orders' });
+    }
+});
+
+// @route   GET /api/orders/:id
+// @desc    Get single order details by ID
+router.get('/:id', authMiddleware, async (req, res) => {
+    try {
+        const order = await Order.findOne({ _id: req.params.id, customer: req.user.id })
+            .populate('customer', 'firstName lastName name email phone')
+            .populate('orderItems.product')
+            .lean();
+            
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+        res.json(order);
+    } catch (err) {
+        console.error("Error fetching order by ID:", err);
+        res.status(500).json({ message: 'Server error while fetching order' });
     }
 });
 
