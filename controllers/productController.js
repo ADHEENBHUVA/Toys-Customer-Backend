@@ -11,10 +11,14 @@ exports.getTrendingProducts = async (req, res) => {
             { $unwind: '$orderItems' },
             { $group: { _id: '$orderItems.product', totalSold: { $sum: '$orderItems.quantity' } } },
             { $sort: { totalSold: -1 } },
-            { $limit: 8 }
+            { $limit: 30 }
         ]);
 
         let productIds = topSelling.map(item => item._id);
+        const soldMap = {};
+        topSelling.forEach(item => {
+            soldMap[item._id.toString()] = item.totalSold;
+        });
         
         let products = [];
         if (productIds.length > 0) {
@@ -60,7 +64,13 @@ exports.getTrendingProducts = async (req, res) => {
             if (p.category && catMap[p.category.toString()]) {
                 catName = catMap[p.category.toString()];
             }
-            return { ...p, category: catName, rating: stats.rating, reviewCount: stats.count };
+            return { 
+                ...p, 
+                totalSold: soldMap[p._id.toString()] || 0,
+                category: catName, 
+                rating: stats.rating, 
+                reviewCount: stats.count 
+            };
         });
 
         res.status(200).json(products);
@@ -128,11 +138,14 @@ exports.getBestSellers = async (req, res) => {
             { $unwind: '$orderItems' },
             { $group: { _id: '$orderItems.product', totalSold: { $sum: '$orderItems.quantity' } } },
             { $sort: { totalSold: -1 } },
-            { $limit: 30 },
-            { $sort: { totalSold: 1 } } // Ascending order as requested
+            { $limit: 30 }
         ]);
 
         let productIds = topSelling.map(item => item._id);
+        const soldMap = {};
+        topSelling.forEach(item => {
+            soldMap[item._id.toString()] = item.totalSold;
+        });
 
         let products = [];
         if (productIds.length > 0) {
