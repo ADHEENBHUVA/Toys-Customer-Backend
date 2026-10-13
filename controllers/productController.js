@@ -1,5 +1,6 @@
 const Product = require('../models/Product');
 const SubCategory = require('../models/SubCategory'); // Required for population
+const Brand = require('../models/Brand'); // Required for population
 const Review = require('../models/Review');
 const Order = require('../models/Order');
 
@@ -23,7 +24,10 @@ exports.getTrendingProducts = async (req, res) => {
         let products = [];
         if (productIds.length > 0) {
             // Fetch the products matching these IDs
-            products = await Product.find({ _id: { $in: productIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } }).lean();
+            products = await Product.find({ _id: { $in: productIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
+                .populate('subCategory', 'name')
+                .populate('brand', 'name logo')
+                .lean();
             
             // Sort them in the order of topSelling
             products.sort((a, b) => {
@@ -35,6 +39,8 @@ exports.getTrendingProducts = async (req, res) => {
         if (products.length < 24) {
             const excludeIds = products.map(p => p._id);
             const additionalProducts = await Product.find({ _id: { $nin: excludeIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
+                .populate('subCategory', 'name')
+                .populate('brand', 'name logo')
                 .sort({ status: 1, featuredProduct: -1, bestSeller: -1, createdAt: -1 })
                 .limit(24 - products.length)
                 .lean();
@@ -91,6 +97,7 @@ exports.getNewArrivals = async (req, res) => {
             createdAt: { $gte: thirtyDaysAgo }
         }, { images: { $slice: 5 } })
             .populate('subCategory', 'name')
+            .populate('brand', 'name logo')
             .sort({ createdAt: -1 })
             .lean();
 
@@ -149,7 +156,10 @@ exports.getBestSellers = async (req, res) => {
 
         let products = [];
         if (productIds.length > 0) {
-            products = await Product.find({ _id: { $in: productIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } }).lean();
+            products = await Product.find({ _id: { $in: productIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
+                .populate('subCategory', 'name')
+                .populate('brand', 'name logo')
+                .lean();
             products.sort((a, b) => {
                 return productIds.findIndex(id => id.toString() === a._id.toString()) - productIds.findIndex(id => id.toString() === b._id.toString());
             });
@@ -191,6 +201,7 @@ exports.getAllProducts = async (req, res) => {
     try {
         let products = await Product.find({ status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
             .populate('subCategory', 'name')
+            .populate('brand', 'name logo')
             .sort({ bestSeller: -1, createdAt: -1 })
             .lean();
         
@@ -236,7 +247,10 @@ exports.getAllProducts = async (req, res) => {
 // Get single product by ID
 exports.getProductById = async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id).lean();
+        const product = await Product.findById(req.params.id)
+            .populate('subCategory', 'name')
+            .populate('brand', 'name logo')
+            .lean();
         if (!product) {
             return res.status(404).json({ message: 'Product not found' });
         }
