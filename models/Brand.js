@@ -5,6 +5,9 @@ const brandSchema = new mongoose.Schema({
     logo: { type: String },
     description: { type: String, trim: true },
     website: { type: String },
+    shape: { type: String, default: 'squircle' },
+    bgColor: { type: String, default: '#FFF0F5' },
+    borderColor: { type: String, default: '#FFB6C1' },
     status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }
 }, { timestamps: true });
 
