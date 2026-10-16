@@ -26,6 +26,18 @@ const testimonialSchema = new mongoose.Schema({
         type: String, // Store image URL or base64 string
         required: true
     },
+    title: {
+        type: String,
+        trim: true
+    },
+    product: {
+        type: String,
+        trim: true
+    },
+    childAge: {
+        type: String,
+        trim: true
+    },
     isActive: {
         type: Boolean,
         default: true
