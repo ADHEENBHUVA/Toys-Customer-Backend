@@ -59,6 +59,7 @@ app.use(async (req, res, next) => {
 
 // Mount Routes
 app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/user', require('./routes/userRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
 app.use('/api/brands', require('./routes/brandRoutes'));
 app.use('/api/banners', require('./routes/bannerRoutes'));

@@ -16,7 +16,7 @@ router.get('/', authMiddleware, async (req, res) => {
             .sort({ createdAt: -1 }) // Newest first
             .lean();
             
-        // Fetch all reviews by this user
+        // Fetch all reviews by this user for the products
         const userReviews = await Review.find({ customer: req.user.id }).lean();
         const reviewCounts = {};
         userReviews.forEach(r => {
@@ -24,17 +24,25 @@ router.get('/', authMiddleware, async (req, res) => {
             reviewCounts[pid] = (reviewCounts[pid] || 0) + 1;
         });
 
-        // Assign hasReviewed flag to each item, prioritizing oldest orders
+        // Assign hasReviewed flag only for DELIVERED orders (oldest first)
+        // We iterate from oldest to newest so the "consumed" review slots
+        // go to the oldest delivered orders first.
         for (let i = orders.length - 1; i >= 0; i--) {
             const order = orders[i];
             order.orderItems.forEach(item => {
                 if (item.product) {
                     const pid = item.product._id.toString();
-                    if (reviewCounts[pid] > 0) {
-                        item.hasReviewed = true;
-                        reviewCounts[pid]--;
+                    // Only show review buttons for delivered orders
+                    if (order.orderStatus === 'Delivered') {
+                        if (reviewCounts[pid] > 0) {
+                            item.hasReviewed = true;
+                            reviewCounts[pid]--;
+                        } else {
+                            item.hasReviewed = false;
+                        }
                     } else {
-                        item.hasReviewed = false;
+                        // For non-delivered orders, don't show review option at all
+                        item.hasReviewed = null;
                     }
                 }
             });

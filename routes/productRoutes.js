@@ -24,4 +24,7 @@ router.post('/:id/reviews', protect, productController.addReview);
 // Protected route to check review eligibility
 router.get('/:id/review-eligibility', protect, productController.checkReviewEligibility);
 
+// Public route to toggle helpful vote on a review (Dynamic)
+router.post('/:id/reviews/:reviewId/helpful', productController.toggleReviewHelpful);
+
 module.exports = router;

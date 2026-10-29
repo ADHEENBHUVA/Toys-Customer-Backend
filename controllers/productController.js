@@ -3,6 +3,7 @@ const SubCategory = require('../models/SubCategory'); // Required for population
 const Brand = require('../models/Brand'); // Required for population
 const Review = require('../models/Review');
 const Order = require('../models/Order');
+const User = require('../models/User'); // Required for population
 
 // Get trending products (Active and Featured/Best Seller, or just recent Active)
 exports.getTrendingProducts = async (req, res) => {
@@ -255,8 +256,17 @@ exports.getProductById = async (req, res) => {
             return res.status(404).json({ message: 'Product not found' });
         }
 
-        const reviews = await Review.find({ product: product._id, status: 'Approved' }).populate('customer', 'firstName lastName').sort({ createdAt: -1 });
-        product.reviews = reviews;
+        const reviews = await Review.find({ product: product._id, status: 'Approved' })
+            .populate('customer', 'name email firstName lastName')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        product.reviews = reviews.map(r => ({
+            ...r,
+            customerName: r.customerName || r.customer?.name || (r.customer?.firstName ? `${r.customer.firstName} ${r.customer?.lastName || ''}`.trim() : '') || 'Happy Customer',
+            helpfulCount: typeof r.helpfulCount === 'number' ? r.helpfulCount : 0,
+            helpfulUsers: r.helpfulUsers || []
+        }));
         product.reviewCount = reviews.length;
         product.rating = reviews.length > 0 ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length) : 0;
 
@@ -274,25 +284,38 @@ exports.addReview = async (req, res) => {
         const productId = req.params.id;
         const customerId = req.user.id;
 
-        // Check if user has purchased the product
-        const purchasedOrdersCount = await Order.countDocuments({
+        // Check if user has a DELIVERED order containing this product
+        const deliveredOrdersCount = await Order.countDocuments({
             customer: customerId,
-            'orderItems.product': productId
+            'orderItems.product': productId,
+            orderStatus: 'Delivered'
         });
 
-        if (purchasedOrdersCount === 0) {
-            return res.status(403).json({ message: 'You can only rate products you have purchased.' });
+        if (deliveredOrdersCount === 0) {
+            return res.status(403).json({ message: 'You can only rate products from delivered orders.' });
         }
 
-        // Check if user already reviewed
+        // Check if user already reviewed (max 1 review per delivered order)
         const existingReviewsCount = await Review.countDocuments({ product: productId, customer: customerId });
-        if (existingReviewsCount >= purchasedOrdersCount) {
-            return res.status(400).json({ message: 'You have already reviewed this product for all your purchases.' });
+        if (existingReviewsCount >= deliveredOrdersCount) {
+            return res.status(400).json({ message: 'You have already reviewed this product for all your delivered orders.' });
         }
+
+        // Fetch user & delivered order to capture customer name from the booked order
+        const deliveredOrder = await Order.findOne({
+            customer: customerId,
+            'orderItems.product': productId,
+            orderStatus: 'Delivered'
+        }).sort({ createdAt: -1 });
+
+        const User = require('../models/User');
+        const user = await User.findById(customerId);
+        const bookedCustomerName = deliveredOrder?.shippingAddress?.fullName || user?.name || 'Valued Customer';
 
         const review = new Review({
             product: productId,
             customer: customerId,
+            customerName: bookedCustomerName,
             rating,
             reviewText,
             status: 'Pending' // Requires admin approval
@@ -307,22 +330,69 @@ exports.addReview = async (req, res) => {
     }
 };
 
-// Check review eligibility
+// Check review eligibility - only DELIVERED orders count
 exports.checkReviewEligibility = async (req, res) => {
     try {
         const productId = req.params.id;
         const customerId = req.user.id;
         
-        const purchasedOrdersCount = await Order.countDocuments({ customer: customerId, 'orderItems.product': productId });
+        // Only count delivered orders for eligibility
+        const deliveredOrdersCount = await Order.countDocuments({
+            customer: customerId,
+            'orderItems.product': productId,
+            orderStatus: 'Delivered'
+        });
         const existingReviewsCount = await Review.countDocuments({ product: productId, customer: customerId });
         
         res.status(200).json({ 
-            canReview: purchasedOrdersCount > existingReviewsCount,
-            hasPurchased: purchasedOrdersCount > 0,
+            canReview: deliveredOrdersCount > existingReviewsCount,
+            hasPurchased: deliveredOrdersCount > 0,
             hasReviewed: existingReviewsCount > 0
         });
     } catch (error) {
         console.error('Error checking review eligibility:', error);
         res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// Toggle Helpful vote on a review (Dynamic)
+exports.toggleReviewHelpful = async (req, res) => {
+    try {
+        const { id, reviewId } = req.params;
+        const { visitorId } = req.body;
+        const voterId = visitorId || req.ip || 'guest';
+
+        const review = await Review.findOne({ _id: reviewId, product: id });
+        if (!review) {
+            return res.status(404).json({ message: 'Review not found' });
+        }
+
+        if (!Array.isArray(review.helpfulUsers)) {
+            review.helpfulUsers = [];
+        }
+
+        const userIndex = review.helpfulUsers.indexOf(voterId);
+        let hasVoted = false;
+
+        if (userIndex > -1) {
+            review.helpfulUsers.splice(userIndex, 1);
+            review.helpfulCount = Math.max(0, (review.helpfulCount || 1) - 1);
+            hasVoted = false;
+        } else {
+            review.helpfulUsers.push(voterId);
+            review.helpfulCount = (review.helpfulCount || 0) + 1;
+            hasVoted = true;
+        }
+
+        await review.save();
+
+        res.json({
+            success: true,
+            helpfulCount: review.helpfulCount,
+            hasVoted
+        });
+    } catch (error) {
+        console.error('Error toggling helpful vote:', error);
+        res.status(500).json({ message: 'Server error updating helpful count' });
     }
 };
