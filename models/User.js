@@ -68,6 +68,23 @@ const userSchema = new mongoose.Schema({
         type: String, // 'google.com' or 'apple.com' or 'password'
         default: 'password'
     },
+    password: {
+        type: String,
+        default: null
+    },
+    totalOrders: {
+        type: Number,
+        default: 0
+    },
+    totalSpending: {
+        type: Number,
+        default: 0
+    },
+    accountStatus: {
+        type: String,
+        enum: ['Active', 'Inactive', 'Suspended'],
+        default: 'Active'
+    },
     role: {
         type: String,
         default: 'customer'

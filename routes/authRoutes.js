@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const admin = require('../config/firebaseConfig');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
@@ -134,9 +135,82 @@ router.post('/social', async (req, res) => {
     }
 });
 
+// @route POST /api/auth/register
+// @desc Register a new customer with Name, Email & Password
+router.post('/register', async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
+
+        if (!email || !email.trim()) {
+            return res.status(400).json({ message: 'Email address is required' });
+        }
+        if (!password || password.length < 6) {
+            return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const existingUser = await User.findOne({ email: normalizedEmail });
+
+        if (existingUser) {
+            return res.status(400).json({ 
+                message: existingUser.provider === 'google'
+                    ? 'An account with this email was created via Google. Please sign in with Google.'
+                    : 'An account with this email already exists. Please sign in with your password.'
+            });
+        }
+
+        const derivedName = (name && name.trim()) ? name.trim() : deriveNameFromEmail(normalizedEmail);
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        const newUser = new User({
+            firebaseUid: `email_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+            email: normalizedEmail,
+            name: derivedName,
+            password: hashedPassword,
+            provider: 'password',
+            role: 'customer'
+        });
+
+        await newUser.save();
+
+        const payload = {
+            user: {
+                id: newUser.id,
+                role: newUser.role
+            }
+        };
+
+        const jwtSecret = process.env.JWT_SECRET || 'your_temporary_jwt_secret_change_me';
+
+        jwt.sign(
+            payload,
+            jwtSecret,
+            { expiresIn: '7d' },
+            (err, token) => {
+                if (err) throw err;
+                res.status(201).json({
+                    token,
+                    user: {
+                        id: newUser._id,
+                        name: newUser.name,
+                        email: newUser.email,
+                        phone: newUser.phone || '',
+                        picture: newUser.picture || '',
+                        addresses: newUser.addresses || [],
+                        role: newUser.role
+                    }
+                });
+            }
+        );
+    } catch (err) {
+        console.error('Registration Error:', err);
+        res.status(500).json({ message: 'Server error during registration', error: err.message });
+    }
+});
+
 // @route POST /api/auth/email-login
-// @desc Authenticate with Email & Password (or email login)
-// Requirement: When customer logs in with email ID, name from email should be set automatically
+// @desc Authenticate with Email & Password
 router.post('/email-login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -144,28 +218,43 @@ router.post('/email-login', async (req, res) => {
         if (!email || !email.trim()) {
             return res.status(400).json({ message: 'Email address is required' });
         }
+        if (!password || !password.trim()) {
+            return res.status(400).json({ message: 'Password is required' });
+        }
 
         const normalizedEmail = email.toLowerCase().trim();
-        const derivedName = deriveNameFromEmail(normalizedEmail);
-
         let user = await User.findOne({ email: normalizedEmail });
 
         if (!user) {
-            // Create new user automatically for email login
-            user = new User({
-                firebaseUid: `email_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                email: normalizedEmail,
-                name: derivedName,
-                provider: 'password',
-                role: 'customer'
+            return res.status(404).json({ 
+                message: 'No account found with this email. Please click "Create an account" below to register.' 
             });
-            await user.save();
+        }
+
+        // Check password
+        if (user.password) {
+            const isMatch = await bcrypt.compare(password, user.password);
+            if (!isMatch) {
+                return res.status(401).json({ message: 'Incorrect password. Please enter your correct password.' });
+            }
         } else {
-            // If user has no name or blank name, prefill it
-            if (!user.name || !user.name.trim()) {
-                user.name = derivedName;
+            // User has no password set (e.g. created via Google)
+            if (user.provider === 'google') {
+                return res.status(400).json({ 
+                    message: 'This account was registered with Google. Please click "Google Rocket" to sign in.' 
+                });
+            } else {
+                // Legacy password account without hash: lock in this password now
+                const salt = await bcrypt.genSalt(10);
+                user.password = await bcrypt.hash(password, salt);
                 await user.save();
             }
+        }
+
+        // If user has blank name, set derived name
+        if (!user.name || !user.name.trim()) {
+            user.name = deriveNameFromEmail(normalizedEmail);
+            await user.save();
         }
 
         const payload = {

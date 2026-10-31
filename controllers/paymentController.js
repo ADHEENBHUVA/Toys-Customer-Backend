@@ -86,6 +86,19 @@ exports.verifyPayment = async (req, res) => {
 
             await newOrder.save();
 
+            // Increment customer totalOrders & totalSpending
+            try {
+                const User = require('../models/User');
+                await User.findByIdAndUpdate(req.user.id, {
+                    $inc: { 
+                        totalOrders: 1,
+                        totalSpending: orderData.totalAmount || 0
+                    }
+                });
+            } catch (userUpdErr) {
+                console.warn('Could not update customer spending stats:', userUpdErr);
+            }
+
             if (orderData.couponCode) {
                 const Coupon = require('../models/Coupon');
                 await Coupon.findOneAndUpdate(
