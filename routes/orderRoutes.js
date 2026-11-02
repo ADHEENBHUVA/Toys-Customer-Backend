@@ -55,6 +55,80 @@ router.get('/', authMiddleware, async (req, res) => {
     }
 });
 
+// @route   POST /api/orders/track
+// @desc    Track order by Order ID, Order Number, or Invoice Number (Public or Auth)
+router.post('/track', async (req, res) => {
+    try {
+        const { orderId, email, phone } = req.body;
+        if (!orderId || !orderId.trim()) {
+            return res.status(400).json({ message: 'Order ID, Number, or Code is required.' });
+        }
+
+        const rawQuery = orderId.trim();
+        let order = null;
+
+        // 1. Direct MongoDB _id match
+        if (/^[0-9a-fA-F]{24}$/.test(rawQuery)) {
+            order = await Order.findById(rawQuery)
+                .populate('customer', 'firstName lastName name email phone')
+                .populate('orderItems.product')
+                .lean();
+        }
+
+        // 2. Exact match by orderNumber or invoiceNumber
+        if (!order) {
+            const cleanCode = rawQuery.replace(/^(#|OD-|ORD-)/i, '');
+            order = await Order.findOne({
+                $or: [
+                    { orderNumber: rawQuery },
+                    { orderNumber: `#${rawQuery.replace(/^#/, '')}` },
+                    { orderNumber: `OD-${cleanCode}` },
+                    { orderNumber: `#OD-${cleanCode}` },
+                    { invoiceNumber: rawQuery }
+                ]
+            })
+            .populate('customer', 'firstName lastName name email phone')
+            .populate('orderItems.product')
+            .lean();
+        }
+
+        // 3. Suffix / Substring match on recent orders
+        if (!order && rawQuery.length >= 4) {
+            const cleanSearch = rawQuery.replace(/^(#|OD-|ORD-)/i, '').toLowerCase();
+            const recentOrders = await Order.find({})
+                .populate('customer', 'firstName lastName name email phone')
+                .populate('orderItems.product')
+                .sort({ createdAt: -1 })
+                .limit(200)
+                .lean();
+
+            order = recentOrders.find(o => {
+                const idStr = String(o._id).toLowerCase();
+                const numStr = String(o.orderNumber || '').toLowerCase();
+                const invStr = String(o.invoiceNumber || '').toLowerCase();
+                return idStr.endsWith(cleanSearch) || idStr.includes(cleanSearch) || numStr.includes(cleanSearch) || invStr.includes(cleanSearch);
+            });
+        }
+
+        if (!order) {
+            return res.status(404).json({ message: 'No order found matching this Order Number or ID.' });
+        }
+
+        // Optional email verification if email provided
+        if (email && email.trim()) {
+            const customerEmail = order.customer?.email || order.shippingAddress?.email || '';
+            if (customerEmail && customerEmail.toLowerCase() !== email.trim().toLowerCase()) {
+                return res.status(401).json({ message: 'The email provided does not match this order.' });
+            }
+        }
+
+        res.json({ success: true, order });
+    } catch (err) {
+        console.error('Error tracking order:', err);
+        res.status(500).json({ message: 'Server error while tracking order' });
+    }
+});
+
 // @route   GET /api/orders/:id
 // @desc    Get single order details by ID
 router.get('/:id', authMiddleware, async (req, res) => {

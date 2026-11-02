@@ -34,25 +34,67 @@ router.post('/social', async (req, res) => {
         
         let uid, email, name, picture;
 
-        if (provider === 'google' && accessToken) {
-            // Fetch user info directly using the access token
-            const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            
-            if (!userInfoRes.ok) {
-                return res.status(401).json({ message: 'Invalid Google access token' });
+        if (provider === 'google') {
+            const token = accessToken || idToken || req.body.credential;
+            if (!token && !req.body.code) {
+                return res.status(400).json({ message: 'No Google access token or credential provided' });
             }
-            
-            const payload = await userInfoRes.json();
-            
-            uid = payload.sub; // Google's unique ID for the user
-            email = payload.email;
-            name = payload.name;
-            picture = payload.picture;
-            
-        } else if (provider === 'apple' || (provider === 'google' && idToken)) {
-            // Login via Firebase (Apple or Google)
+
+            if (accessToken) {
+                // Fetch user info directly using the access token
+                const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: { Authorization: `Bearer ${accessToken}` }
+                });
+                
+                if (userInfoRes.ok) {
+                    const payload = await userInfoRes.json();
+                    uid = payload.sub;
+                    email = payload.email;
+                    name = payload.name;
+                    picture = payload.picture;
+                } else {
+                    return res.status(401).json({ message: 'Invalid Google access token' });
+                }
+            } else if (idToken || req.body.credential) {
+                const tokenToVerify = idToken || req.body.credential;
+                try {
+                    const ticket = await googleClient.verifyIdToken({
+                        idToken: tokenToVerify,
+                        audience: process.env.GOOGLE_CLIENT_ID
+                    });
+                    const payload = ticket.getPayload();
+                    uid = payload.sub;
+                    email = payload.email;
+                    name = payload.name;
+                    picture = payload.picture;
+                } catch (verifyErr) {
+                    // Fallback to Google tokeninfo endpoint
+                    const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${tokenToVerify}`);
+                    if (!tokenInfoRes.ok) {
+                        console.error('Google token verification error:', verifyErr);
+                        return res.status(401).json({ message: 'Invalid Google ID token' });
+                    }
+                    const payload = await tokenInfoRes.json();
+                    uid = payload.sub;
+                    email = payload.email;
+                    name = payload.name;
+                    picture = payload.picture;
+                }
+            } else if (req.body.code) {
+                const { tokens } = await googleClient.getToken(req.body.code);
+                const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: { Authorization: `Bearer ${tokens.access_token}` }
+                });
+                if (!userInfoRes.ok) {
+                    return res.status(401).json({ message: 'Invalid Google auth code' });
+                }
+                const payload = await userInfoRes.json();
+                uid = payload.sub;
+                email = payload.email;
+                name = payload.name;
+                picture = payload.picture;
+            }
+        } else if (provider === 'apple') {
             if (!idToken) return res.status(400).json({ message: 'No ID token provided' });
             
             if (!admin.app) {
@@ -63,7 +105,6 @@ router.post('/social', async (req, res) => {
             email = decodedToken.email;
             name = decodedToken.name;
             picture = decodedToken.picture;
-            
         } else {
             return res.status(400).json({ message: 'Invalid provider' });
         }

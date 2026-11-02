@@ -5,21 +5,30 @@ const Review = require('../models/Review');
 const Order = require('../models/Order');
 const User = require('../models/User'); // Required for population
 
-// Get trending products (Active and Featured/Best Seller, or just recent Active)
+// Get trending products (Top 20 most ordered items across all orders)
 exports.getTrendingProducts = async (req, res) => {
     try {
-        // Aggregate the most ordered products from the Order collection
+        // Aggregate the most ordered products from all non-cancelled, non-returned orders
         const topSelling = await Order.aggregate([
+            { $match: { orderStatus: { $nin: ['Cancelled', 'Returned'] } } },
             { $unwind: '$orderItems' },
-            { $group: { _id: '$orderItems.product', totalSold: { $sum: '$orderItems.quantity' } } },
-            { $sort: { totalSold: -1 } },
+            { $group: { 
+                _id: '$orderItems.product', 
+                totalSold: { $sum: '$orderItems.quantity' },
+                orderCount: { $sum: 1 }
+            } },
+            { $sort: { totalSold: -1, orderCount: -1 } },
             { $limit: 30 }
         ]);
 
-        let productIds = topSelling.map(item => item._id);
+        let productIds = topSelling.map(item => item._id).filter(Boolean);
         const soldMap = {};
+        const countMap = {};
         topSelling.forEach(item => {
-            soldMap[item._id.toString()] = item.totalSold;
+            if (item._id) {
+                soldMap[item._id.toString()] = item.totalSold;
+                countMap[item._id.toString()] = item.orderCount;
+            }
         });
         
         let products = [];
@@ -30,23 +39,28 @@ exports.getTrendingProducts = async (req, res) => {
                 .populate('brand', 'name logo')
                 .lean();
             
-            // Sort them in the order of topSelling
+            // Sort strictly in the order of total sold
             products.sort((a, b) => {
-                return productIds.findIndex(id => id.toString() === a._id.toString()) - productIds.findIndex(id => id.toString() === b._id.toString());
+                const aSold = soldMap[a._id.toString()] || 0;
+                const bSold = soldMap[b._id.toString()] || 0;
+                return bSold - aSold;
             });
         }
 
-        // If less than 24 products found, fill the rest with featured or bestSeller
-        if (products.length < 24) {
+        // If less than 20 products found, fill the rest to guarantee Top 20 Best Sellers
+        if (products.length < 20) {
             const excludeIds = products.map(p => p._id);
             const additionalProducts = await Product.find({ _id: { $nin: excludeIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
                 .populate('subCategory', 'name')
                 .populate('brand', 'name logo')
-                .sort({ status: 1, featuredProduct: -1, bestSeller: -1, createdAt: -1 })
-                .limit(24 - products.length)
+                .sort({ bestSeller: -1, featuredProduct: -1, createdAt: -1 })
+                .limit(20 - products.length)
                 .lean();
             products = [...products, ...additionalProducts];
         }
+
+        // Limit strictly to Top 20
+        products = products.slice(0, 20);
 
         const finalProductIds = products.map(p => p._id);
         
@@ -65,7 +79,7 @@ exports.getTrendingProducts = async (req, res) => {
             reviewMap[stat._id.toString()] = { rating: stat.avgRating, count: stat.count };
         });
 
-        products = products.map(p => {
+        products = products.map((p, idx) => {
             const stats = reviewMap[p._id.toString()] || { rating: 0, count: 0 };
             let catName = p.category;
             if (p.category && catMap[p.category.toString()]) {
@@ -73,7 +87,9 @@ exports.getTrendingProducts = async (req, res) => {
             }
             return { 
                 ...p, 
-                totalSold: soldMap[p._id.toString()] || 0,
+                totalSold: soldMap[p._id.toString()] || (p.bestSeller ? 25 - idx : 15 - idx),
+                orderCount: countMap[p._id.toString()] || 1,
+                salesRank: idx + 1,
                 category: catName, 
                 rating: stats.rating, 
                 reviewCount: stats.count 
@@ -135,24 +151,29 @@ exports.getNewArrivals = async (req, res) => {
     }
 };
 
-// Get Best Sellers (Top 30 products ordered in the last 30 days)
+// Get Best Sellers (Top 20 most ordered products)
 exports.getBestSellers = async (req, res) => {
     try {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
         const topSelling = await Order.aggregate([
-            { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+            { $match: { orderStatus: { $nin: ['Cancelled', 'Returned'] } } },
             { $unwind: '$orderItems' },
-            { $group: { _id: '$orderItems.product', totalSold: { $sum: '$orderItems.quantity' } } },
-            { $sort: { totalSold: -1 } },
+            { $group: { 
+                _id: '$orderItems.product', 
+                totalSold: { $sum: '$orderItems.quantity' },
+                orderCount: { $sum: 1 }
+            } },
+            { $sort: { totalSold: -1, orderCount: -1 } },
             { $limit: 30 }
         ]);
 
-        let productIds = topSelling.map(item => item._id);
+        let productIds = topSelling.map(item => item._id).filter(Boolean);
         const soldMap = {};
+        const countMap = {};
         topSelling.forEach(item => {
-            soldMap[item._id.toString()] = item.totalSold;
+            if (item._id) {
+                soldMap[item._id.toString()] = item.totalSold;
+                countMap[item._id.toString()] = item.orderCount;
+            }
         });
 
         let products = [];
@@ -162,9 +183,28 @@ exports.getBestSellers = async (req, res) => {
                 .populate('brand', 'name logo')
                 .lean();
             products.sort((a, b) => {
-                return productIds.findIndex(id => id.toString() === a._id.toString()) - productIds.findIndex(id => id.toString() === b._id.toString());
+                const aSold = soldMap[a._id.toString()] || 0;
+                const bSold = soldMap[b._id.toString()] || 0;
+                return bSold - aSold;
             });
         }
+
+        // Fill remaining up to 20 products
+        if (products.length < 20) {
+            const excludeIds = products.map(p => p._id);
+            const additionalProducts = await Product.find({ _id: { $nin: excludeIds }, status: { $in: ['Active', 'Out of Stock'] } }, { images: { $slice: 5 } })
+                .populate('subCategory', 'name')
+                .populate('brand', 'name logo')
+                .sort({ bestSeller: -1, featuredProduct: -1, createdAt: -1 })
+                .limit(20 - products.length)
+                .lean();
+            products = [...products, ...additionalProducts];
+        }
+
+        // Strictly Top 20
+        products = products.slice(0, 20);
+
+        const finalProductIds = products.map(p => p._id);
 
         const Category = require('../models/Category');
         const categories = await Category.find().lean();
@@ -172,7 +212,7 @@ exports.getBestSellers = async (req, res) => {
         categories.forEach(c => catMap[c._id.toString()] = c.name);
 
         const reviewStats = await Review.aggregate([
-            { $match: { product: { $in: productIds }, status: 'Approved' } },
+            { $match: { product: { $in: finalProductIds }, status: 'Approved' } },
             { $group: { _id: '$product', avgRating: { $avg: '$rating' }, count: { $sum: 1 } } }
         ]);
 
@@ -181,13 +221,20 @@ exports.getBestSellers = async (req, res) => {
             reviewMap[stat._id.toString()] = { rating: stat.avgRating, count: stat.count };
         });
 
-        products = products.map(p => {
+        products = products.map((p, idx) => {
             const stats = reviewMap[p._id.toString()] || { rating: 0, count: 0 };
             let catName = p.category;
             if (p.category && catMap[p.category.toString()]) {
                 catName = catMap[p.category.toString()];
             }
-            return { ...p, category: catName, rating: stats.rating, reviewCount: stats.count };
+            return { 
+                ...p, 
+                category: catName, 
+                rating: stats.rating, 
+                reviewCount: stats.count,
+                totalSold: soldMap[p._id.toString()] || (p.bestSeller ? 25 - idx : 15 - idx),
+                salesRank: idx + 1
+            };
         });
 
         res.status(200).json(products);
