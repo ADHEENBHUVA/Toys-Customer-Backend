@@ -74,6 +74,7 @@ app.use('/api/testimonials', require('./routes/testimonialRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
 app.use('/api/promomedia', require('./routes/promoMediaRoutes'));
+app.use('/api/instagram', require('./routes/instagramRoutes'));
 
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
